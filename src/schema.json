@@ -1,0 +1,126 @@
+[
+  {
+    "namespace": "experiments.taskbar_tabs",
+    "description": "APIs supporting taskbar_tabs",
+    "functions": [
+      {
+        "name": "setAUMID",
+        "type": "function",
+        "async": false,
+        "description": "Sets the AUMID for the given window to the hostname",
+        "parameters": [
+          {
+            "name": "windowId",
+            "type": "integer",
+            "description": "The window to set the AUMID for"
+          },
+          {
+            "name": "siteId",
+            "type": "string",
+            "description": "The siteId will be used as the AUMID of the window"
+          }
+        ]
+      },
+      {
+        "name": "setIcon",
+        "type": "function",
+        "async": false,
+        "description": "Sets the window icon",
+        "parameters": [
+          {
+            "name": "windowId",
+            "type": "integer",
+            "description": "The window to set the icon for"
+          },
+          {
+            "name": "siteId",
+            "type": "string",
+            "description": "The siteId is used for the name of the icon on disk"
+          }
+        ]
+      },
+      {
+        "name": "createShortcut",
+        "type": "function",
+        "async": false,
+        "description": "Creates a shortcut for the taskbar window",
+        "parameters": [
+          {
+            "name": "siteId",
+            "type": "string",
+            "description": "The siteId is used for the AUMID of the shortcut"
+          },
+          {
+            "name": "windowId",
+            "type": "integer",
+            "description": "The window to set the icon for"
+          },
+          {
+            "name": "displayName",
+            "type": "string",
+            "description": "The tooltip of the shortcut on the taskbar"
+          },
+          {
+            "name": "homepage",
+            "type": "string",
+            "description": "The page to open the browser to"
+          },
+          {
+            "name": "pin",
+            "type": "boolean",
+            "description": "Whether the shortcut should be pinned to the taskbar when created"
+          }
+        ]
+      },
+      {
+        "name": "deleteShortcut",
+        "type": "function",
+        "async": false,
+        "description": "Deletes a shortcut for the taskbar window",
+        "parameters": [
+          {
+            "name": "siteId",
+            "type": "string",
+            "description": "The siteId of the site to delete the shortcut for"
+          },
+          {
+            "name": "displayName",
+            "type": "string",
+            "description": "The displayName for the site, which is used as the filename of the shortcut"
+          },
+          {
+            "name": "deleteIcon",
+            "type": "boolean",
+            "description": "Indicates whether or not to delete the icon as well"
+          }
+        ] 
+      },
+      {
+        "name": "copyPinexe",
+        "type": "function",
+        "async": false,
+        "description": "Copies pin.exe to the profile path",
+        "parameters": [
+          {
+            "name": "pinexeUrl",
+            "type": "string",
+            "description": "The moz-extension URL to pin.exe"
+          }
+        ]
+      },
+      {
+        "name": "isPinned",
+        "type": "function",
+        "async": true,
+        "description": "Determines if the site is pinned to the taskbar",
+        "parameters": [
+          {
+            "name": "siteId",
+            "type": "string",
+            "description": "The siteId for the site to check"
+          }
+        ]
+      }
+    ]
+  }
+]

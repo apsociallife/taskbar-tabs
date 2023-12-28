@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="tt_popup.css">
+</head>
+
+<body>
+    <div id="main">
+        <div class="title" id="Title">
+            <img id="backButton" class="title-icon back-button" src="images/back-white.png" alt="Back" />
+            <img class="title-icon" src="images/taskbar-tabs.png" alt="Taskbar Tabs Icon" />
+            <span class="title-text">Taskbar Tabs</span>
+        </div>
+
+        <hr class="white-line">
+        <span class="header">Default settings for new taskbar tabs:</span><br>
+        
+        <br>
+
+        <input type=checkbox id="defaultPinSite"><label for="defaultPinSite">Pin to taskbar</label><br>
+        <input type=checkbox id="defaultLaunchWithFirefox"><label for="defaultLaunchWithFirefox">Launch with Firefox</label><br>
+        <input type=checkbox id="defaultNewTabHomepage"><label for="defaultNewTabHomepage">Open new tab to site homepage</label><br>
+        
+        <br>
+
+        <label for="defaultLinkBehavior">Link capture behavior:</label>
+        <div><select id="defaultLinkBehavior">
+                <option value="0">Don't capture links</option>
+                <option value="1">Capture in a new tab</option>
+                <option value="2">Capture in the current tab</option>
+                <option value="3">Capture in a new window</option>                
+        </select></div>
+
+        <br>
+
+        <hr class="white-line">
+
+        <div class="site-list" id="siteList">
+            <div class="site" id="siteTemplate" style="display: none">
+                <div class="site-info">
+                    <div class="site-status" id="siteStatus"></div>
+                    <span class="site-name" id="siteName"></span>
+                </div>
+                <img class="site-delete" id="siteDelete" src="images/tabs.png" alt="Delete" title="Uninstall site. Move all open tabs back to Firefox." />
+            </div>
+        </div>
+        
+
+    </div>
+
+    <div id="site" style="display: none">
+        <div class="hover-edit" id="displayName">
+            <input type="text" id="displayNameInput" class="editable-input" maxlength="255" />
+            <img id="saveDisplayName" class="save-button" src="images/save-white.png" alt="Save" />
+        </div>
+
+        <label for="homepageInput">Homepage:</label>
+        <div class="hover-edit" id="homepage">
+            <input type="text" id="homepageInput" class="editable-input" maxlength="4096" />
+            <img id="saveHomepage" class="save-button" src="images/save-white.png" alt="Save" />
+        </div>
+
+        <label for="scopeInput">Scope:</label>
+        <div class="hover-edit" id="scope">
+            <input type="text" id="scopeInput" class="editable-input" maxlength="255" />
+            <img id="saveScope" class="save-button" src="images/save-white.png" alt="Save" />
+        </div>
+
+        <label for="linkBehavior">Capture links for this site?</label>
+        <div><select id="linkBehavior">
+                <option value="0">No, don't capture links</option>
+                <option value="1">Yes, in a new tab</option>
+                <option value="2">Yes, in the current tab</option>
+                <option value="3">Yes, in a new window</option>                
+            </select></div>
+        
+        <input type=checkbox id="launchWithFirefox"><label for="launchWithFirefox">Launch this site with Firefox</label><br>
+        <input type=checkbox id="newTabHomepage"><label for="newTabHomepage">Open new tabs to the homepage</label>
+
+        <hr class="white-line">
+
+        <div class = "action-container" id="uninstallSiteContainer">
+            <img class="action-icon" src="images/tabs.png" />
+            <span class = "action-name" id="uninstallSite">Move all tabs for this site back to Firefox</span>
+        </div>
+        <div class = "action-container" id="manageSitesContainer"></div>
+            <img class="action-icon" src="images/taskbar-tabs.png" />
+            <span class = "action-name" id="manageSites">Manage all Taskbar Tabs sites</span>
+        </div>
+    </div>
+        
+    <script src="tt_popup.js"></script>
+
+</body>
+
+</html>

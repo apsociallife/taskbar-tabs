@@ -1,0 +1,195 @@
+body {
+    background-color: #454545;
+    border-radius: 8px;
+    margin: 10;
+    padding: 0;
+    overflow: hidden;
+    width: 300px;
+    font-family: "system-ui", sans-serif;
+    color: #AAAAAA;
+    font-size: 14px;
+}
+
+input[type=checkbox] {
+    margin-bottom: 10px;
+}
+
+label {
+    margin-bottom: 5px;   
+}
+
+label[for='launchWithFirefox'],
+label[for='newTabHomepage'],
+label[for='defaultLaunchWithFirefox'],
+label[for='defaultPinSite'],
+label[for='defaultNewTabHomepage'] {
+    color: #FFFFFF;
+}
+
+.title {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;  
+}
+
+.title-text {
+    font-size: 24px;
+    color: #FFFFFF;
+}
+
+.header {
+    font-size: 16px;
+    color: #FFFFFF;
+}
+
+.title-icon {
+    width: 24px;
+    height: 24px;
+    margin-right: 10px;
+}
+
+.back-button {
+    display: none;
+    cursor: pointer;
+}
+
+.back-button:hover {
+    content: url('images/back-hover.png');
+}
+
+.white-line {
+    border: none;
+    height: 1px;
+    background-color: white;
+}
+
+.hover-edit {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;  
+}
+
+.hover-edit .editable-input {
+    border: 1px solid transparent;
+    background: none;
+    outline: none;
+    width: 260px;
+    color: #FFFFFF;
+    font-size: 14px;
+    padding: 3px;
+}
+
+.hover-edit:first-of-type .editable-input {
+    font-size: 20px;
+}
+
+.hover-edit .editable-input:focus,
+.hover-edit:hover .editable-input {
+    border: 1px solid #FFFFFF;
+}
+
+.hover-edit .save-button {
+    display: none;
+    width: 24px;
+    height: auto;
+    cursor: pointer;
+    margin-left: 6px;
+}
+
+select#linkBehavior,
+select#defaultLinkBehavior {
+    margin-top: 5px;
+    margin-bottom: 10px;  
+    border: 1px solid #FFFFFF;
+    background: none;
+    color: #FFFFFF;
+    background-color: #454545;
+}
+
+select#linkBehavior option:-moz-focusring,
+select#defaultLinkBehavior option:-moz-focusring {
+    background-color: #AAAAAA;
+}
+
+.site-list {
+    margin-bottom: 10px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.site-info {
+    display: flex;
+    align-items: center;
+    flex-grow: 1;
+}
+
+.site {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 280px;
+    margin-bottom: 10px;
+    height: 20px;
+}
+
+.site-status {
+    width: 8px;
+    height: 8px;
+    background-color: gray;
+    border-radius: 50%;
+    margin-right: 10px;
+  }
+
+
+.site-name {
+    color: white;
+    cursor: default;
+    width: 238px;
+}
+
+.site-name:hover {
+    color: #0088FF;
+    cursor: pointer;
+}
+
+.site-delete {
+    display: flex;
+    width: 16px;
+    height: 16px; 
+    cursor: pointer;
+    visibility: hidden;
+    margin-right: 8px;
+    border: 2px solid transparent;
+}
+
+.site:hover .site-delete {
+    visibility: visible;
+}
+
+.site-delete:hover {
+    border: 2px solid #0088FF
+}
+
+.action-container {
+    display: flex;
+    justify-content: left;
+    align-items: left;
+    margin-bottom: 4px;
+}
+
+.action-name {
+    color: white;
+    cursor: pointer;
+}
+
+.action-name:hover {
+    color:  #0088FF;
+}
+
+.action-icon {
+    width: 16px;
+    height: 16px;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
