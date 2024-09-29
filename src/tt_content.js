@@ -1,3 +1,4 @@
+// Send a message to the background script when the user interacts with the page.
 let userInteracted = false;
 
 function sendInteractionMessage() {

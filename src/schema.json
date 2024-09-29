@@ -33,9 +33,9 @@
             "description": "The window to set the icon for"
           },
           {
-            "name": "siteId",
+            "name": "iconURL",
             "type": "string",
-            "description": "The siteId is used for the name of the icon on disk"
+            "description": "The URL to the icon"
           }
         ]
       },
@@ -54,6 +54,11 @@
             "name": "windowId",
             "type": "integer",
             "description": "The window to set the icon for"
+          },
+          {
+            "name": "iconURL",
+            "type": "string",
+            "description": "The URL to the icon"
           },
           {
             "name": "displayName",

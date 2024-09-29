@@ -48,8 +48,9 @@ async function addInstalledSite(windowId, installSite) {
     // until the extension is reloaded so async is fine. 
     browser.storage.local.set({ installedSites: installedSites });
 
-    // Create the shortcut. This also sets the icon. 
-    browser.experiments.taskbar_tabs.createShortcut(installSite.id, windowId, installSite.displayName, installSite.homepage, installSite.pinned)
+    // Create the shortcut. This also sets the icon.
+    windowManager[windowId].iconURL = installSite.iconURL;
+    browser.experiments.taskbar_tabs.createShortcut(installSite.id, windowId, installSite.iconURL, installSite.displayName, installSite.homepage, installSite.pinned)
     console.log("addInstalledSite: installedSites: " + JSON.stringify(installedSites));
 }
 
@@ -269,6 +270,7 @@ let tabManager = {};  // Keeps track of all tabs
 //     isBlank: true/false // Tab was created in a taskbar window, but hasn't been navigated to a real URL yet
 //     isNew: true/false // Tab was created in a taskbar window, but hasn't been touched by the user
 //     noCapture: true/false // Tab should not capture links
+//     iconURL: "https://example.com/favicon.ico" // The icon URL for the tab
 // }
 
 //Count the number of detached tabs
@@ -541,19 +543,24 @@ function makeTaskbarWindow(windowId, scope, installSite) {
     console.log("makeTaskbarWindow: windowId: " + windowId + ", scope: " + scope + ", installSite: " + installSite)
     siteId = crc32(scope);
     if (installSite) {
-        addInstalledSite(windowId, {
-            id: siteId,
-            scope: scope,
-            displayName: getDisplayName(scope),
-            launchWithFirefox: settings.launchWithFirefox,
-            homepage: "https://" + scope.replace("*.", ""),
-            linkBehavior: settings.linkBehavior,
-            newTabHomepage: settings.newTabHomepage,
-            pinned: settings.pinSite
-        }).then(() => {
-            console.log("makeTaskbarWindow: Setting AUMID for window id: " + windowId + " to siteId: " + siteId)
-            browser.experiments.taskbar_tabs.setAUMID(windowId, siteId);
-            browser.sessions.setWindowValue(windowId, "siteId", siteId);
+
+        GetActiveTabIconURL(windowId).then((activeTabIconURL) => {
+
+            addInstalledSite(windowId, {
+                id: siteId,
+                scope: scope,
+                displayName: getDisplayName(scope),
+                launchWithFirefox: settings.launchWithFirefox,
+                homepage: "https://" + scope.replace("*.", ""),
+                linkBehavior: settings.linkBehavior,
+                newTabHomepage: settings.newTabHomepage,
+                pinned: settings.pinSite,
+                iconURL: activeTabIconURL
+            }).then(() => {
+                console.log("makeTaskbarWindow: Setting AUMID for window id: " + windowId + " to siteId: " + siteId)
+                browser.experiments.taskbar_tabs.setAUMID(windowId, siteId);
+                browser.sessions.setWindowValue(windowId, "siteId", siteId);
+            });
         });
     } else {
         console.log("makeTaskbarWindow: Setting AUMID for window id: " + windowId + " to siteId: " + siteId)
@@ -671,7 +678,7 @@ browser.tabs.onAttached.addListener((tabId, attachInfo) => {
         detachedTabs = reduceToDetachedTabs();
         if (detachedTabs[tabId]) {
             clearInterval(interval);
-            
+
             //If the window is new (not in the windowManager yet), it becomes a taskbar window or not depending on the tab's detachedSiteId
             if (!windowManager[attachInfo.newWindowId]) {
                 console.log("tab.onAttached: New window id: " + attachInfo.newWindowId + " not in windowManager yet")
@@ -683,7 +690,7 @@ browser.tabs.onAttached.addListener((tabId, attachInfo) => {
                         siteId: "",
                         unknownWindow: false
                     };
-                    setTabState(tabId);
+                    getWindowStateFromTab(tabId);
                     tabManager[tabId].movedFromWindowId = 0;
                     console.log("tab.onAttached: Tab id: " + tabId + " with blank detachedSiteId moved to new regular window id: " + attachInfo.newWindowId)
                 } else {
@@ -709,7 +716,7 @@ browser.tabs.onAttached.addListener((tabId, attachInfo) => {
                             makeTaskbarWindow(attachInfo.newWindowId, scope, true);
                         });
                     }
-                    setTabState(tabId);
+                    getWindowStateFromTab(tabId);
                     console.log("tab.onAttached: Tab id: " + tabId + " with siteId: " + detachedTabs[tabId].detachedSiteId + " moved to new taskbar window id: " +
                         attachInfo.newWindowId)
                 }
@@ -731,12 +738,12 @@ browser.tabs.onAttached.addListener((tabId, attachInfo) => {
                     if (windowManager[attachInfo.newWindowId].siteId === detachedTabs[tabId].detachedSiteId
                         || windowManager[attachInfo.newWindowId].siteId === ""
                         || isInScope(detachedTabUrl, installedSites[windowManager[attachInfo.newWindowId].siteId].scope)) {
-                        
-                        setTabState(tabId);
+
+                        getWindowStateFromTab(tabId);
                         focusTab(attachInfo.newWindowId, tabId)
-                        
+
                         if (tabManager[tabId]) { tabManager[tabId].detachedSiteId = "none" };
-                        
+
                         if (windowManager[attachInfo.newWindowId].siteId === "") {
                             tabManager[tabId].movedFromWindowId = 0;
                         }
@@ -745,10 +752,10 @@ browser.tabs.onAttached.addListener((tabId, attachInfo) => {
                         if (windowManager[attachInfo.newWindowId].siteId === "" && detachedTabs[tabId].detachedSiteId !== "") {
                             tabManager[tabId].noCapture = true;
                         }
-                        
+
                         console.log("tab.onAttached: Tab id: " + tabId + " with siteId " + detachedTabs[tabId].detachedSiteId +
                             " moved to window id: " + attachInfo.newWindowId)
-                    
+
                     } else { // If the window rejects the tab, it becomes its own normal window                                
                         console.log("tab.onAttached: Tab id: " + tabId + " with siteId " + detachedTabs[tabId].detachedSiteId + " does not match window id: " +
                             attachInfo.newWindowId + " with siteId: " + windowManager[attachInfo.newWindowId].siteId + ". Creating new window")
@@ -798,18 +805,22 @@ function focusTab(windowId, tabId) {
     });
 }
 
-//Set tab state when tab receives focus within its window
+//Get the window state from a tab when it becomes active
 browser.tabs.onActivated.addListener((activeInfo) => {
     console.log("tab.onActivated: Tab id: " + activeInfo.tabId + " activated in window id: " + activeInfo.windowId)
-    setTabState(activeInfo.tabId);
+    getWindowStateFromTab(activeInfo.tabId);
 });
 
-// When the tab is navigated to a site, update the tab state and remove any unknownWindow flag from its parent window
+// When the tab is navigated, remove any unknownWindow flag from its parent window
+// When the favicon URL is changed, update the URL in the tab manager and the window manager
+// Note that we don't update the favicon URL for the installed site. We'll save this icon once, when the site is installed
+// After these updates, get the window state from the tab if it's the active tab
 browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.url || changeInfo.faviconUrl) {
-        console.log("tab.onUpdated: Tab id: " + tabId + " updated in window id: " + tab.windowId + " with url: " + tab.url)
+    if (changeInfo.url) {
+        console.log("tab.onUpdated: URL for tab id: " + tabId + " updated in window id: " + tab.windowId + " with url: " + changeInfo.url)
 
-        if (changeInfo.url && changeInfo.url !== "about:blank") {
+        // If this is not a blank tab, remove the unknownWindow flag from the parent window
+        if (changeInfo.url !== "about:blank") {
 
             // Clear unknownWindow flag from parent window
             if (windowManager[tab.windowId] && windowManager[tab.windowId].unknownWindow) {
@@ -824,8 +835,16 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
                 handleNewTaskbarTab(tab);
             }
         }
-        setTabState(tabId);
+
+        getWindowStateFromTab(tabId);
     }
+
+    if (changeInfo.favIconUrl)
+    {
+        console.log("tab.onUpdated: Favicon URL for tab id: " + tabId + " updated in window id: " + tab.windowId + " with url: " + changeInfo.favIconUrl)
+        getWindowStateFromTab(tabId);
+    }
+
 });
 
 // Keep track of which tabs belong to which windows
@@ -840,13 +859,14 @@ browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
 // "new tab page" then OnBeforeRequest won't handle it. We need to handle it here instead by redirecting it to the homepage
 // of the site or moving it to a new window, depending on the newTabHomepage setting.
 browser.tabs.onCreated.addListener((tab) => {
+
     tabManager[tab.id] = {
         windowId: tab.windowId,
         movedFromWindowId: 0,
         detachedSiteId: "none",
         isBlank: false,
         isNew: true,
-        noCapture: false
+        noCapture: false,
     }
     console.log("tab.onCreated: Tab id: " + tab.id + " created in window id: " + tab.windowId + " for url: " + tab.url);
 
@@ -868,8 +888,6 @@ browser.tabs.onCreated.addListener((tab) => {
             handleNewTaskbarTab(tab);
         }
     }
-
-    setTabState(tab.id);
 });
 
 // When a new tab is created in a taskbar window, it might need special handling if:
@@ -898,8 +916,9 @@ function handleNewTaskbarTab(tab) {
             tabManager[tab.id].isNew = false;
             wasNewTabPage = true;
             console.log("handleNewTaskbarTab: Tab id: " + tab.id + " is a new tab for a taskbar window. becaause newTabHomepage is true, redirecting to home page for the site")
-        
-        } else { // Move the tab to a new window. This is the least disruptive way to give the user a new tab that isn't in scope. 
+
+            // Move the tab to a new window. This is the least disruptive way to give the user a new tab that isn't in scope. 
+        } else {
             console.log("handleNewTaskbarTab: Tab id: " + tab.id + " is a new tab for a taskbar window. because newTabHomepage is false, moving to a new window")
             moveFromTaskbar(tab, false, true);
             return;
@@ -1477,9 +1496,13 @@ browser.runtime.onMessage.addListener(function (request, sender) {
                     let oldDisplayName = installedSites[siteId].displayName;
                     updateInstalledSite(siteId, { displayName: request.value });
                     refreshPinnedState().then(function () {
-                        browser.experiments.taskbar_tabs.deleteShortcut(siteId, oldDisplayName, false);
-                        browser.experiments.taskbar_tabs.createShortcut(siteId, windowId, request.value, installedSites[siteId].homepage, installedSites[siteId].pinned);
-                        browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[siteId] });
+                        GetActiveTabIconURL(windowId).then((activeTabIconURL) => {
+                            browser.experiments.taskbar_tabs.deleteShortcut(siteId, oldDisplayName, false);
+                            windowManager[windowId].iconURL = activeTabIconURL;
+                            browser.experiments.taskbar_tabs.createShortcut(siteId, windowId, activeTabIconURL, request.value, installedSites[siteId].homepage,
+                                installedSites[siteId].pinned);
+                            browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[siteId] });
+                        });
                     });
                     break;
 
@@ -1539,33 +1562,37 @@ browser.runtime.onMessage.addListener(function (request, sender) {
 
                     refreshPinnedState().then(function () {
 
-                        installSite = {
-                            id: newSiteId,
-                            scope: newScope,
-                            displayName: getDisplayName(newScope),
-                            launchWithFirefox: installedSites[siteId].launchWithFirefox,
-                            homepage: newHomepage,
-                            linkBehavior: oldLinkBehavior,
-                            newTabHomepage: installedSites[siteId].newTabHomepage,
-                            pinned: installedSites[siteId].pinned
-                        }
+                        GetActiveTabIconURL(windowId).then((activeTabIconURL) => {
 
-                        // Next, we need to uninstall the site
-                        uninstallSite(siteId);
-
-                        // Now add a new installed site
-                        addInstalledSite(windowId, installSite).then(function () {
-
-                            // Update the windowManager and set the AUMID for each window
-                            for (let windowId in windowManager) {
-                                if (windowManager[windowId].siteId === siteId) {
-                                    windowManager[windowId].siteId = newSiteId;
-                                    browser.experiments.taskbar_tabs.setAUMID(parseInt(windowId), newSiteId);
-                                }
+                            installSite = {
+                                id: newSiteId,
+                                scope: newScope,
+                                displayName: getDisplayName(newScope),
+                                launchWithFirefox: installedSites[siteId].launchWithFirefox,
+                                homepage: newHomepage,
+                                linkBehavior: oldLinkBehavior,
+                                newTabHomepage: installedSites[siteId].newTabHomepage,
+                                pinned: installedSites[siteId].pinned,
+                                iconURL: activeTabIconURL
                             }
-                            browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[newSiteId] });
-                        }).catch(error => {
-                            console.error("Failed to add installed site:", error);
+
+                            // Next, we need to uninstall the site
+                            uninstallSite(siteId);
+
+                            // Now add a new installed site
+                            addInstalledSite(windowId, installSite).then(function () {
+
+                                // Update the windowManager and set the AUMID for each window
+                                for (let windowId in windowManager) {
+                                    if (windowManager[windowId].siteId === siteId) {
+                                        windowManager[windowId].siteId = newSiteId;
+                                        browser.experiments.taskbar_tabs.setAUMID(parseInt(windowId), newSiteId);
+                                    }
+                                }
+                                browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[newSiteId] });
+                            }).catch(error => {
+                                console.error("Failed to add installed site:", error);
+                            });
                         });
                     });
                     break;
@@ -1577,9 +1604,12 @@ browser.runtime.onMessage.addListener(function (request, sender) {
                     if (isInScope(new URL(homepage), installedSites[siteId].scope)) {
                         updateInstalledSite(siteId, { homepage: homepage });
                         refreshPinnedState().then(function () {
-                            browser.experiments.taskbar_tabs.deleteShortcut(siteId, installedSites[siteId].displayName, false);
-                            browser.experiments.taskbar_tabs.createShortcut(siteId, windowId, installedSites[siteId].displayName, homepage, installedSites[siteId].pinned);
-                            browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[siteId] })
+                            GetActiveTabIconURL(windowId).then((activeTabIconURL) => {
+                                browser.experiments.taskbar_tabs.deleteShortcut(siteId, installedSites[siteId].displayName, false);
+                                windowManager[windowId].iconURL = activeTabIconURL;
+                                browser.experiments.taskbar_tabs.createShortcut(siteId, windowId, activeTabIconURL, installedSites[siteId].displayName, homepage, installedSites[siteId].pinned);
+                                browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[siteId] })
+                            });
                         });
                     } else {
                         console.log("onMessage:updateInstalledSite: New homepage is not in the site scope. Not changing homepage.")
@@ -1612,28 +1642,75 @@ browser.runtime.onMessage.addListener(function (request, sender) {
     }
 });
 
-// As user switches the focused tab, we need to update pageAction because
-// this doesn't have natural tab affinity. We also need to set the window icon because
-// it can change between tabs (rarely) and because we don't have enough information to 
-// get an icon when the window is created, only when a site has been loaded into a tab
-function setTabState(tabId) {
-    console.log("setTabState: Tab id: " + tabId);
+// The current tab affects the window in two ways:
+// 1. The current tab determines the state of the page action button
+// 2. The current tab determines the icon of the taskbar window
+function getWindowStateFromTab(tabId) {
+    console.log("getWindowStateFromTab: Tab id: " + tabId);
     browser.tabs.get(tabId, function (tab) {
         if (browser.runtime.lastError) {
             console.error("Error getting tab: " + browser.runtime.lastError.message);
             return;
         }
-        windowId = tab.windowId;
-        tabManager[tabId].windowId = windowId;
-        if (windowManager[windowId] && windowManager[windowId].siteId !== "" && tab.url.startsWith("http")) {
-            siteId = windowManager[windowId].siteId;
-            browser.experiments.taskbar_tabs.setIcon(windowId, siteId);
-            setPageAction(tabId, true);
-            console.log("setTabState: " + tabId + " is a taskbar tab");
-        } else {
-            setPageAction(tabId, false);
-            console.log("setTabState: " + tabId + " is not a taskbar tab");
+
+        // Only do this if the tab is the active tab in the window
+        if (tab.active) {
+
+            windowId = tab.windowId;
+            tabManager[tabId].windowId = windowId;
+
+            if (windowManager[windowId] && windowManager[windowId].siteId !== "" && tab.url.startsWith("http")) {
+                
+                console.log("getWindowStateFromTab: " + tabId + " is a taskbar tab");
+                setPageAction(tabId, true);
+
+                console.log("getWindowStateFromTab: " + tabId + " has favIconUrl: " + tab.favIconUrl);
+
+                if (windowManager[windowId].iconURL !== tab.favIconUrl) {
+                    console.log("getWindowStateFromTab: Setting icon for window id: " + windowId + " to: " + tab.favIconUrl);
+                    windowManager[windowId].iconURL = tab.favIconUrl;
+                    browser.experiments.taskbar_tabs.setIcon(windowId, tab.favIconUrl);
+                }
+
+            } else {
+                
+                console.log("getWindowStateFromTab: " + tabId + " is not a taskbar tab");
+                setPageAction(tabId, false);
+
+            }
         }
+    });
+}
+
+// Wait for the active tab to have a defined non-blank favIconUrl and then return it
+function GetActiveTabIconURL(windowId) {
+    console.log("GetActiveTabIconURL: Window id: " + windowId);
+    return new Promise((resolve, reject) => {
+        browser.tabs.query({ windowId: windowId, active: true }, function (tabs) {
+            if (browser.runtime.lastError) {
+                console.error("GetActiveTabIconURL: Error querying for tabs: " + browser.runtime.lastError.message);
+                reject(browser.runtime.lastError.message);
+            }
+            if (tabs[0].favIconUrl && tabs[0].favIconUrl !== "") {
+                console.log("GetActiveTabIconURL: Active tab with id " + tabs[0].id + " has favIconUrl: " + tabs[0].favIconUrl);
+                resolve(tabs[0].favIconUrl);
+            } else {
+                console.log("GetActiveTabIconURL: Active tab with id " + tabs[0].id + " does not have a favIconUrl. Waiting for it to load.");  
+                interval = setInterval(function () {
+                    browser.tabs.query({ windowId: windowId, active: true }, function (tabs) {
+                        if (tabs[0].favIconUrl && tabs[0].favIconUrl !== "") {
+                            console.log("GetActiveTabIconURL: Active tab with id " + tabs[0].id + " now has a favIconUrl: " + tabs[0].favIconUrl);
+                            clearInterval(interval);
+                            resolve(tabs[0].favIconUrl);
+                        }
+                        else
+                        {
+                            console.log("GetActiveTabIconURL: Active tab with id " + tabs[0].id + " still does not have a favIconUrl. Waiting for it to load.");
+                        }
+                    });
+                }, 100);
+            }
+        });
     });
 }
 
@@ -1727,10 +1804,8 @@ function initializeWindowManager(windows) {
                     isNew: false,
                     noCapture: false
                 };
-                //If this tab is the active tab in the window, set the tab state
-                if (tab.active) {
-                    setTabState(tab.id);
-                }
+
+                getWindowStateFromTab(tab.id);
             });
         });
     });
@@ -1738,4 +1813,3 @@ function initializeWindowManager(windows) {
         console.log("Window manager initialized");
     });
 }
-
