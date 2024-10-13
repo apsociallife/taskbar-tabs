@@ -214,17 +214,21 @@ function isInScope(url, scope) {
         // Wildcard hostname
         let scopeHostname = scopePart1.substring(2);
         if (url.hostname.endsWith(scopeHostname)) {
-            // Hostname IS in scope, now check path
-            if (firstSlashIndex > 0) {
-                if (url.pathname.startsWith(scopePart2)) {
-                    // Path is also in scope
+            // Ensure the match is for the exact domain or subdomain
+            let hostnamePrefix = url.hostname.slice(0, -scopeHostname.length);
+            if (hostnamePrefix === "" || hostnamePrefix.endsWith(".")) {
+                // Hostname IS in scope, now check path
+                if (firstSlashIndex > 0) {
+                    if (url.pathname.startsWith(scopePart2)) {
+                        // Path is also in scope
+                        console.log("belongsToSite: " + url + " belongs to scope " + scope);
+                        return true;
+                    }
+                } else {
+                    // No path specified, so it's in scope based on hostname alone
                     console.log("belongsToSite: " + url + " belongs to scope " + scope);
                     return true;
                 }
-            } else {
-                // No path specified, so it's in scope based on hostname alone
-                console.log("belongsToSite: " + url + " belongs to scope " + scope);
-                return true;
             }
         }
     } else {
