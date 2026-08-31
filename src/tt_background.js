@@ -48,9 +48,17 @@ async function addInstalledSite(windowId, installSite) {
     // until the extension is reloaded so async is fine. 
     browser.storage.local.set({ installedSites: installedSites });
 
-    // Create the shortcut. This also sets the icon.
-    windowManager[windowId].iconURL = installSite.iconURL;
-    browser.experiments.taskbar_tabs.createShortcut(installSite.id, windowId, installSite.iconURL, installSite.displayName, installSite.homepage, installSite.pinned)
+    // Create the shortcut. This also sets the icon. A failure here costs the
+    // taskbar icon and the pin, but the window can still be separated onto its
+    // own taskbar entry, so don't reject and skip setting the AUMID.
+    if (windowManager[windowId]) {
+        windowManager[windowId].iconURL = installSite.iconURL;
+    }
+    try {
+        await browser.experiments.taskbar_tabs.createShortcut(installSite.id, windowId, installSite.iconURL, installSite.displayName, installSite.homepage, installSite.pinned);
+    } catch (error) {
+        console.error("addInstalledSite: Could not create shortcut for " + installSite.displayName + ": " + error);
+    }
     console.log("addInstalledSite: installedSites: " + JSON.stringify(installedSites));
 }
 
@@ -85,7 +93,8 @@ function updateInstalledSite(siteId, properties) {
 // Remove the site from the list of installed sites, and delete/unpin the shortcut
 function uninstallSite(siteId) {
     console.log("uninstallSite: " + siteId);
-    browser.experiments.taskbar_tabs.deleteShortcut(siteId, installedSites[siteId].displayName, true);
+    browser.experiments.taskbar_tabs.deleteShortcut(siteId, installedSites[siteId].displayName, true)
+        .catch(error => console.error("uninstallSite: Could not delete shortcut: " + error));
     delete installedSites[siteId];
     browser.storage.local.set({ installedSites: installedSites }, function () {
         if (browser.runtime.lastError) {
@@ -545,12 +554,23 @@ browser.windows.onCreated.addListener(function (window) {
 // Then sets the AUMID, separatng this window into its own taskbar entry
 function makeTaskbarWindow(windowId, scope, installSite) {
     console.log("makeTaskbarWindow: windowId: " + windowId + ", scope: " + scope + ", installSite: " + installSite)
-    siteId = crc32(scope);
+
+    // This has to be a local. Half this file assigns siteId without declaring
+    // it, so a bare siteId here is the same global that other handlers write
+    // to, and it gets clobbered while the installation below is awaiting.
+    let siteId = crc32(scope);
+
+    // The AUMID is what actually separates the window on the taskbar, so set it
+    // before anything else. It used to run only after the site had finished
+    // installing, which meant a slow or failed icon fetch left the window
+    // grouped in with the rest of Firefox.
+    console.log("makeTaskbarWindow: Setting AUMID for window id: " + windowId + " to siteId: " + siteId)
+    browser.experiments.taskbar_tabs.setAUMID(windowId, siteId);
+    browser.sessions.setWindowValue(windowId, "siteId", siteId);
+
     if (installSite) {
-
         GetActiveTabIconURL(windowId).then((activeTabIconURL) => {
-
-            addInstalledSite(windowId, {
+            return addInstalledSite(windowId, {
                 id: siteId,
                 scope: scope,
                 displayName: getDisplayName(scope),
@@ -560,16 +580,10 @@ function makeTaskbarWindow(windowId, scope, installSite) {
                 newTabHomepage: settings.newTabHomepage,
                 pinned: settings.pinSite,
                 iconURL: activeTabIconURL
-            }).then(() => {
-                console.log("makeTaskbarWindow: Setting AUMID for window id: " + windowId + " to siteId: " + siteId)
-                browser.experiments.taskbar_tabs.setAUMID(windowId, siteId);
-                browser.sessions.setWindowValue(windowId, "siteId", siteId);
             });
+        }).catch(error => {
+            console.error("makeTaskbarWindow: Could not install site " + siteId + ": " + error);
         });
-    } else {
-        console.log("makeTaskbarWindow: Setting AUMID for window id: " + windowId + " to siteId: " + siteId)
-        browser.experiments.taskbar_tabs.setAUMID(windowId, siteId);
-        browser.sessions.setWindowValue(windowId, "siteId", siteId);
     }
 }
 
@@ -951,7 +965,7 @@ function handleNewTaskbarTab(tab) {
                 return;
             }
             makeTaskbarWindow(window.id, installedSites[windowSiteId].scope, false)
-            console.log("handleNewTaskbarTab: Tab id: " + tab.id + " moved to new window id: " + windowId)
+            console.log("handleNewTaskbarTab: Tab id: " + tab.id + " moved to new window id: " + window.id)
         });
         return;
     }
@@ -1501,11 +1515,14 @@ browser.runtime.onMessage.addListener(function (request, sender) {
                     updateInstalledSite(siteId, { displayName: request.value });
                     refreshPinnedState().then(function () {
                         GetActiveTabIconURL(windowId).then((activeTabIconURL) => {
-                            browser.experiments.taskbar_tabs.deleteShortcut(siteId, oldDisplayName, false);
                             windowManager[windowId].iconURL = activeTabIconURL;
-                            browser.experiments.taskbar_tabs.createShortcut(siteId, windowId, activeTabIconURL, request.value, installedSites[siteId].homepage,
-                                installedSites[siteId].pinned);
-                            browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[siteId] });
+                            // The old shortcut has to be gone before the new one is written,
+                            // otherwise the rename can leave two entries behind.
+                            browser.experiments.taskbar_tabs.deleteShortcut(siteId, oldDisplayName, false)
+                                .then(() => browser.experiments.taskbar_tabs.createShortcut(siteId, windowId, activeTabIconURL, request.value,
+                                    installedSites[siteId].homepage, installedSites[siteId].pinned))
+                                .catch(error => console.error("updateInstalledSite: Could not rename shortcut: " + error))
+                                .then(() => browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[siteId] }));
                         });
                     });
                     break;
@@ -1609,10 +1626,12 @@ browser.runtime.onMessage.addListener(function (request, sender) {
                         updateInstalledSite(siteId, { homepage: homepage });
                         refreshPinnedState().then(function () {
                             GetActiveTabIconURL(windowId).then((activeTabIconURL) => {
-                                browser.experiments.taskbar_tabs.deleteShortcut(siteId, installedSites[siteId].displayName, false);
                                 windowManager[windowId].iconURL = activeTabIconURL;
-                                browser.experiments.taskbar_tabs.createShortcut(siteId, windowId, activeTabIconURL, installedSites[siteId].displayName, homepage, installedSites[siteId].pinned);
-                                browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[siteId] })
+                                browser.experiments.taskbar_tabs.deleteShortcut(siteId, installedSites[siteId].displayName, false)
+                                    .then(() => browser.experiments.taskbar_tabs.createShortcut(siteId, windowId, activeTabIconURL,
+                                        installedSites[siteId].displayName, homepage, installedSites[siteId].pinned))
+                                    .catch(error => console.error("updateInstalledSite: Could not update shortcut: " + error))
+                                    .then(() => browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[siteId] }));
                             });
                         });
                     } else {
@@ -1673,7 +1692,8 @@ function getWindowStateFromTab(tabId) {
                 if (windowManager[windowId].iconURL !== tab.favIconUrl) {
                     console.log("getWindowStateFromTab: Setting icon for window id: " + windowId + " to: " + tab.favIconUrl);
                     windowManager[windowId].iconURL = tab.favIconUrl;
-                    browser.experiments.taskbar_tabs.setIcon(windowId, tab.favIconUrl);
+                    browser.experiments.taskbar_tabs.setIcon(windowId, tab.favIconUrl, tab.url)
+                        .catch(error => console.error("getWindowStateFromTab: Could not set icon: " + error));
                 }
 
             } else {
@@ -1720,13 +1740,6 @@ function GetActiveTabIconURL(windowId) {
 
 // Initialization
 
-// Copy pin.exe to the profile directory
-// Amazing that this can even be done from a webextension, though of course it's only because it's
-// a privileged extension
-pinexeUrl = browser.runtime.getURL("pin.exe")
-console.log("Initialization: Copying pin.exe to profile directory: " + pinexeUrl)
-browser.experiments.taskbar_tabs.copyPinexe(pinexeUrl);
-
 // Load settings from storage
 browser.storage.local.get("settings", function (result) {
     if (browser.runtime.lastError) {
@@ -1767,12 +1780,7 @@ browser.storage.local.get("installedSites", function (result) {
                 Object.values(installedSites).forEach(function (installedSite) {
                     if (installedSite.launchWithFirefox && !windowManager[installedSite.id]) {
                         console.log("Initialization: Launching installed site: " + installedSite.displayName)
-                        browser.windows.create({ url: installedSite.homepage }).then(function (window) {
-                            if (browser.runtime.lastError) {
-                                console.error("Error creating window: " + browser.runtime.lastError.message);
-                                return;
-                            }
-                        })
+                        browser.windows.create({ url: installedSite.homepage });
                     }
                 });
             });

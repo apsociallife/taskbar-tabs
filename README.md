@@ -8,11 +8,25 @@ This is a privileged Firefox web extension that includes a `taskbar_tabs` experi
 
 ## Intent
 
-The intent of the extension is to make commonly used websites more accessible by running them in windows that have separate taskbar entries, and can be pinned to the taskbar. The extension shows the favicon for the site in the taskbar, so although taskbar windows are just Firefox windows, the user will see Facebook, YouTube, GMail, etc. icons in their taskbar and can launch them from there. Internally this is accomplished by setting the AppUserModelID (AUMID) for these windows to something different for each site. Windows taskbar code automatically ungroups these windows from Firefox when this is done. To enable pinning, a shortcut must be created which contains the AUMID and command line used to launch. To actually pin the shortcut programmatically, we rely on a mechanism published by [Gee Law](https://geelaw.blog/entries/msedge-pins/) and also used in Firefox code. This is compiled into `pin.exe` which is packaged in the extension, copied to a local folder, and run as needed to pin and unpin.
+The intent of the extension is to make commonly used websites more accessible by running them in windows that have separate taskbar entries, and can be pinned to the taskbar. The extension shows the favicon for the site in the taskbar, so although taskbar windows are just Firefox windows, the user will see Facebook, YouTube, GMail, etc. icons in their taskbar and can launch them from there. Internally this is accomplished by setting the AppUserModelID (AUMID) for these windows to something different for each site. Windows taskbar code automatically ungroups these windows from Firefox when this is done. To enable pinning, a shortcut must be created which contains the AUMID and command line used to launch.
+
+Pinning used to require `pin.exe`, a small binary compiled from the mechanism published by [Gee Law](https://geelaw.blog/entries/msedge-pins/), which the extension packaged, copied into the profile, and ran. That is no longer necessary: Firefox itself now exposes `pinShortcutToTaskbar` and `unpinShortcutFromTaskbar` on `nsIWindowsShellService`, so the extension calls those directly and ships no binary.
+
+Be aware of how pinning behaves on current Windows 11. Firefox prefers a WinRT API that requires the user to confirm via a system toast, and that toast only appears if the calling process has window focus; the older COM path can be rejected outright with no way to detect it. So a pin triggered by a real click on the page action generally works, while one triggered programmatically tends to resolve successfully and pin nothing. If a confirmation toast appears and is ignored, Windows may block further pin attempts until it is restarted. Firefox's own [Pin to Taskbar](https://firefox-source-docs.mozilla.org/widget/windows/shell/pin-to-taskbar.html) docs cover this.
+
+## A note on Firefox API churn
+
+This extension's privileged API talks to Windows through XPCOM contract IDs rather than Firefox module URIs wherever it can, and loads the modules it does need inside the functions that use them. That is deliberate. Module paths have been renamed twice over the extension's life, and because the imports originally sat at the top of `api.js`, one rename (`XPCOMUtils.defineLazyModuleGetters`, removed with the JSM-to-ESM migration) threw before the API class was defined and silently disabled the entire privileged half of the extension. Windows still got no per-site AUMIDs, no icons and no shortcuts, and nothing in the extension surfaced an error. Contract IDs have been stable across the same period.
+
+If taskbar windows stop being separated from Firefox again, check first whether the experiment API is loading at all: `browser.experiments.taskbar_tabs` should be an object exposing `setAUMID`, `setIcon`, `createShortcut`, `deleteShortcut` and `isPinned`. To confirm from the outside whether a window carries its own AUMID, read `PKEY_AppUserModel_ID` off the HWND with `SHGetPropertyStoreForWindow`; a window still grouped with Firefox will report the install-hash default. When checking taskbar buttons on a multi-monitor setup, remember that the primary monitor's taskbar is `Shell_TrayWnd` and every other monitor gets a `Shell_SecondaryTrayWnd`, so looking only at the former makes windows on other monitors appear to have no taskbar button.
+
+## Building
+
+`src/` does not contain `psl.min.js` or `images/`, which the extension needs at runtime, so it will not package standalone from a fresh clone. `tools/build-xpi.ps1` stages `src/` and backfills anything missing from an already-installed copy of the extension.
 
 ## Approach
 
-- A list of "installed" sites is maintained, each with its own settings. An installed site has an icon and shortcut in Windows, capable of being pinned and launched.
+- A list of "installed" sites is maintained, each with its own settings. An installed site has an icon and shortcut in Windows, capable of being pinned and launched. Icons live in `TaskbarTabs` under the local profile directory, and shortcuts go in the Start Menu's `Programs` folder.
 - A "pinned site" is an installed site which has its shortcut pinned currently
 - A "taskbar window" is a Firefox window which is associated with an installed site. It appears on the taskbar separately using AUMID differntiation, and with its own icon.
 - A site can be installed by pressing the "move to taskbar" page action button. This will install the site, pin the site, and move it to a new taskbar window

@@ -24,7 +24,7 @@
       {
         "name": "setIcon",
         "type": "function",
-        "async": false,
+        "async": true,
         "description": "Sets the window icon",
         "parameters": [
           {
@@ -36,13 +36,19 @@
             "name": "iconURL",
             "type": "string",
             "description": "The URL to the icon"
+          },
+          {
+            "name": "pageURL",
+            "type": "string",
+            "optional": true,
+            "description": "The page the icon belongs to, used to look up an already rasterized favicon in Places"
           }
         ]
       },
       {
         "name": "createShortcut",
         "type": "function",
-        "async": false,
+        "async": true,
         "description": "Creates a shortcut for the taskbar window",
         "parameters": [
           {
@@ -80,7 +86,7 @@
       {
         "name": "deleteShortcut",
         "type": "function",
-        "async": false,
+        "async": true,
         "description": "Deletes a shortcut for the taskbar window",
         "parameters": [
           {
@@ -97,19 +103,6 @@
             "name": "deleteIcon",
             "type": "boolean",
             "description": "Indicates whether or not to delete the icon as well"
-          }
-        ] 
-      },
-      {
-        "name": "copyPinexe",
-        "type": "function",
-        "async": false,
-        "description": "Copies pin.exe to the profile path",
-        "parameters": [
-          {
-            "name": "pinexeUrl",
-            "type": "string",
-            "description": "The moz-extension URL to pin.exe"
           }
         ]
       },
