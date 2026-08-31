@@ -22,7 +22,9 @@ If taskbar windows stop being separated from Firefox again, check first whether 
 
 ## Building
 
-`src/` does not contain `psl.min.js` or `images/`, which the extension needs at runtime, so it will not package standalone from a fresh clone. `tools/build-xpi.ps1` stages `src/` and backfills anything missing from an already-installed copy of the extension.
+`tools/build-xpi.ps1` packages everything under `src/` into `dist/taskbar-tabs.xpi`.
+
+It writes zip entries one at a time instead of using `ZipFile.CreateFromDirectory`, because on .NET Framework that helper names entries with the OS directory separator. An `.xpi` containing `images\taskbar.png` rather than `images/taskbar.png` installs and runs without complaint, but every icon referenced by the manifest, the popup and the page action silently fails to load. The script refuses to emit an archive containing a backslash for that reason.
 
 ## Approach
 

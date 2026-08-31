@@ -3,67 +3,69 @@
 Packages src/ into a Taskbar Tabs .xpi.
 
 .DESCRIPTION
-Stages the contents of src/ and zips it. Note that src/ in this repo does not
-currently contain psl.min.js or images/, which the extension needs at runtime.
-If those are missing, they are pulled from -VendorFrom, which defaults to the
-copy of the extension already installed in the Nightly profile.
+Zips the contents of src/ with the extension manifest at the archive root.
+
+Entries are written one at a time rather than with ZipFile.CreateFromDirectory,
+because on .NET Framework that helper writes entry names using the OS directory
+separator. A .xpi built that way contains "images\taskbar.png", which is not a
+valid zip path, and Firefox silently fails to resolve every icon in the
+manifest, the popup and the page action.
 
 .PARAMETER OutFile
 Where to write the .xpi. Defaults to dist/taskbar-tabs.xpi.
-
-.PARAMETER VendorFrom
-An existing .xpi to source any assets missing from src/.
 #>
 [CmdletBinding()]
 param(
-  [string]$OutFile,
-  [string]$VendorFrom = "$env:APPDATA\Mozilla\Firefox\Profiles\iexnlvqe.default-nightly\extensions\taskbar-tabs@mozilla.com.xpi"
+  [string]$OutFile
 )
 
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $repo = Split-Path -Parent $PSScriptRoot
 $src = Join-Path $repo 'src'
 if (-not $OutFile) { $OutFile = Join-Path $repo 'dist\taskbar-tabs.xpi' }
 
-$stage = Join-Path ([System.IO.Path]::GetTempPath()) "tt-build-$([guid]::NewGuid().ToString('N'))"
-New-Item -ItemType Directory -Path $stage | Out-Null
+if (-not (Test-Path (Join-Path $src 'manifest.json'))) {
+  throw "No manifest.json in $src - is this the right repo?"
+}
 
+$outDir = Split-Path -Parent $OutFile
+if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
+if (Test-Path $OutFile) { Remove-Item $OutFile -Force }
+
+$zip = [System.IO.Compression.ZipFile]::Open($OutFile, 'Create')
 try {
-  Copy-Item -Path (Join-Path $src '*') -Destination $stage -Recurse -Force
-
-  # Backfill anything src/ doesn't carry from a previously built .xpi.
-  if (Test-Path $VendorFrom) {
-    $zip = [System.IO.Compression.ZipFile]::OpenRead($VendorFrom)
+  foreach ($file in Get-ChildItem $src -Recurse -File) {
+    $relative = $file.FullName.Substring($src.Length + 1).Replace('\', '/')
+    $entry = $zip.CreateEntry($relative, [System.IO.Compression.CompressionLevel]::Optimal)
+    $stream = $entry.Open()
     try {
-      foreach ($entry in $zip.Entries) {
-        if ($entry.FullName.EndsWith('/')) { continue }
-        # pin.exe is no longer used; Firefox pins shortcuts natively now.
-        if ($entry.FullName -eq 'pin.exe') { continue }
-        $dest = Join-Path $stage ($entry.FullName -replace '/', '\')
-        if (Test-Path $dest) { continue }
-        $destDir = Split-Path -Parent $dest
-        if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
-        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dest, $true)
-        Write-Host "  vendored: $($entry.FullName)"
-      }
-    } finally { $zip.Dispose() }
-  } else {
-    Write-Warning "Vendor source not found: $VendorFrom"
+      $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+      $stream.Write($bytes, 0, $bytes.Length)
+    } finally {
+      $stream.Dispose()
+    }
   }
-
-  $outDir = Split-Path -Parent $OutFile
-  if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
-  if (Test-Path $OutFile) { Remove-Item $OutFile -Force }
-
-  [System.IO.Compression.ZipFile]::CreateFromDirectory(
-    $stage, $OutFile, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-
-  $manifest = Get-Content (Join-Path $stage 'manifest.json') -Raw | ConvertFrom-Json
-  Write-Host "Built $($manifest.name) $($manifest.version) -> $OutFile ($((Get-Item $OutFile).Length) bytes)"
-  Write-Output $OutFile
+} finally {
+  $zip.Dispose()
 }
-finally {
-  Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+
+# A backslash here means the archive is broken in a way Firefox won't report.
+$check = [System.IO.Compression.ZipFile]::OpenRead($OutFile)
+try {
+  $bad = @($check.Entries | Where-Object { $_.FullName -match '\\' })
+  $count = $check.Entries.Count
+} finally {
+  $check.Dispose()
 }
+if ($bad.Count) {
+  Remove-Item $OutFile -Force
+  throw "Refusing to ship an .xpi with backslash entry names: $($bad.FullName -join ', ')"
+}
+
+$manifest = Get-Content (Join-Path $src 'manifest.json') -Raw | ConvertFrom-Json
+Write-Host "Built $($manifest.name) $($manifest.version) -> $OutFile"
+Write-Host "  $count entries, $((Get-Item $OutFile).Length) bytes"
+Write-Output $OutFile
