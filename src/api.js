@@ -50,6 +50,53 @@ function fileFor(path) {
   return file;
 }
 
+/**
+ * Splits a hostname using Firefox's own public suffix list.
+ *
+ * This replaces the vendored copy of the psl package, which nothing kept up to
+ * date. nsIEffectiveTLDService is the same list Gecko uses for cookies and
+ * permissions, and it ships with every Firefox update, so the extension's idea
+ * of what counts as one site now matches the browser's.
+ *
+ * @param {string} host - A hostname, with no scheme, port or path.
+ * @returns {object} `domain` is the registrable domain (example.co.uk),
+ *   `publicSuffix` the part the registry owns (co.uk), `sld` the label below it
+ *   (example), and `subdomain` whatever precedes the registrable domain, or "".
+ */
+function splitHost(host) {
+  let result = { host, domain: "", publicSuffix: "", sld: "", subdomain: "" };
+  if (!host) {
+    return result;
+  }
+
+  try {
+    result.domain = Services.eTLD.getBaseDomainFromHost(host);
+  } catch (e) {
+    // IP literals, single label hosts and bare public suffixes have no
+    // registrable domain. Treating the whole host as the domain keeps callers
+    // from having to special case them.
+    result.domain = host;
+  }
+
+  try {
+    result.publicSuffix = Services.eTLD.getPublicSuffixFromHost(host);
+  } catch (e) {
+    result.publicSuffix = "";
+  }
+
+  if (result.publicSuffix && result.domain.endsWith("." + result.publicSuffix)) {
+    result.sld = result.domain.slice(0, -(result.publicSuffix.length + 1));
+  } else {
+    result.sld = result.domain;
+  }
+
+  if (host !== result.domain && host.endsWith("." + result.domain)) {
+    result.subdomain = host.slice(0, -(result.domain.length + 1));
+  }
+
+  return result;
+}
+
 function windowFor(windowId) {
   // WebExtension window IDs are outer window IDs, so this maps straight across.
   let window = WindowMediator.getOuterWindowWithId(windowId);
@@ -149,6 +196,15 @@ this.experiments_taskbar_tabs = class extends ExtensionAPI {
     return {
       experiments: {
         taskbar_tabs: {
+
+          // Splits a hostname against Firefox's public suffix list. Async only
+          // because the service lives in the parent process; callers should
+          // resolve this once when a site is installed rather than per request.
+          parseHost(host) {
+            let parsed = splitHost(host);
+            console.log("API parseHost: " + host + " -> " + JSON.stringify(parsed));
+            return Promise.resolve(parsed);
+          },
 
           // Separates this window from Firefox and other taskbar windows.
           // Groups it only with other taskbar windows with the same siteId.

@@ -145,35 +145,24 @@ function sortInstalledSites() {
 
     let sortableSites = [];
     for (let siteId in installedSites) {
-        site = installedSites[siteId];
+        let site = installedSites[siteId];
 
         // Determine if the site has a wildcard, then remove it from the scope
-        scope = site.scope
-        wildcard = scope.startsWith("*.");
+        let scope = site.scope;
+        let wildcard = scope.startsWith("*.");
         scope = scope.replace("*.", "");
 
-        // Get the hostname domain count and the path length
-        let pathLength;
-        let hostname
-        firstSlashIndex = scope.indexOf("/");
-        if (firstSlashIndex === -1) {
-            hostname = scope;
-            pathLength = 0
-        } else {
-            hostname = scope.slice(0, firstSlashIndex);
-            pathLength = scope.slice(firstSlashIndex).length;
-        }
-        let subdomain = psl.parse(hostname).subdomain;
-        let subdomainCount = 0;
-        if (subdomain) {
-            let hostnameParts = subdomain.split(".");
-            subdomainCount = hostnameParts.length;
-        }
+        // Get the path length
+        let firstSlashIndex = scope.indexOf("/");
+        let pathLength = firstSlashIndex === -1 ? 0 : scope.slice(firstSlashIndex).length;
 
         // Add the calculated values to an array that will be sorted
         sortableSites.push({
             siteId: siteId,
-            subdomainCount: subdomainCount,
+            // Recorded when the site was installed. The public suffix list now
+            // comes from Firefox, which means a trip to the parent process, and
+            // sorting has to stay synchronous.
+            subdomainCount: site.subdomainCount ?? 0,
             wildcard: wildcard,
             pathLength: pathLength
         });
@@ -569,11 +558,16 @@ function makeTaskbarWindow(windowId, scope, installSite) {
     browser.sessions.setWindowValue(windowId, "siteId", siteId);
 
     if (installSite) {
-        GetActiveTabIconURL(windowId).then((activeTabIconURL) => {
+        Promise.all([
+            GetActiveTabIconURL(windowId),
+            describeScope(scope)
+        ]).then(([activeTabIconURL, described]) => {
             return addInstalledSite(windowId, {
                 id: siteId,
                 scope: scope,
-                displayName: getDisplayName(scope),
+                displayName: described.displayName,
+                baseDomain: described.baseDomain,
+                subdomainCount: described.subdomainCount,
                 launchWithFirefox: settings.launchWithFirefox,
                 homepage: "https://" + scope.replace("*.", ""),
                 linkBehavior: settings.linkBehavior,
@@ -587,20 +581,67 @@ function makeTaskbarWindow(windowId, scope, installSite) {
     }
 }
 
-// Calculate a default display name from a scope
+// Split a scope into the hostname and path parts it is built from
+function splitScope(scope) {
+    let bare = scope.replace("*.", "");
+    let firstSlashIndex = bare.indexOf("/");
+    return {
+        hostname: firstSlashIndex === -1 ? bare : bare.slice(0, firstSlashIndex),
+        path: firstSlashIndex === -1 ? "" : bare.slice(firstSlashIndex)
+    };
+}
+
+// Everything derived from the public suffix list that an installed site needs,
+// resolved in one trip to the privileged side. Firefox's eTLD service lives in
+// the parent process so this has to be async, which is fine because it only
+// runs when a site is installed or its scope changes. The results are stored on
+// the site so that the request path never has to consult the list.
+async function describeScope(scope) {
+    let { hostname, path } = splitScope(scope);
+    let parsed = await browser.experiments.taskbar_tabs.parseHost(hostname);
+    console.log("describeScope: " + scope + " -> " + JSON.stringify(parsed));
+
+    return {
+        displayName: displayNameFrom(parsed, path),
+        baseDomain: parsed.domain,
+        subdomainCount: parsed.subdomain ? parsed.subdomain.split(".").length : 0
+    };
+}
+
+// Sites installed before the public suffix data came from Firefox have no
+// registrable domain or subdomain count recorded, and the request path now
+// depends on both. Fill them in once, at startup.
+async function backfillSiteDomains() {
+    let changed = false;
+    for (let siteId in installedSites) {
+        let site = installedSites[siteId];
+        if (site.baseDomain && site.subdomainCount !== undefined) {
+            continue;
+        }
+        try {
+            let described = await describeScope(site.scope);
+            site.baseDomain = described.baseDomain;
+            site.subdomainCount = described.subdomainCount;
+            changed = true;
+            console.log("backfillSiteDomains: " + site.scope + " -> " + site.baseDomain);
+        } catch (error) {
+            console.error("backfillSiteDomains: Could not resolve " + site.scope + ": " + error);
+        }
+    }
+    if (changed) {
+        await browser.storage.local.set({ installedSites: installedSites });
+    }
+}
+
+// Calculate a default display name from a parsed scope
 // www.facebook.com becomes Facebook, news.yahoo.com become Yahoo News
 // Any path is appended to the end, with invalid characters replaced with spaces
-function getDisplayName(scope) {
-    console.log("getDisplayName: scope: " + scope)
-    scopeUrl = new URL("https://" + scope.replace("*.", ""))
-    const parsed = psl.parse(scopeUrl.hostname);
-    console.log("parsed: " + JSON.stringify(parsed))
+function displayNameFrom(parsed, path) {
     let parts = [];
     if (parsed.subdomain) {
         parts = parsed.subdomain.split('.');
     }
     parts.push(parsed.sld);
-    console.log("parts: " + JSON.stringify(parts))
 
     if (parts[0] === 'www') {
         parts.shift();
@@ -610,13 +651,12 @@ function getDisplayName(scope) {
         parts[i] = parts[i].charAt(0).toUpperCase() + parts[i].slice(1);
     }
 
-    displayName = parts.reverse().join(' ');
-    displayName = displayName + scopeUrl.pathname;
+    let displayName = parts.reverse().join(' ') + path;
     displayName = displayName.replace(/[\\/:*?"<>|]/g, ' ')
     displayName = displayName.replace(/\b\w/g, char => char.toUpperCase());
     displayName = displayName.replace(/^\s+|\s+$/g, '');
 
-    console.log("getDisplayName: displayName: " + displayName)
+    console.log("displayNameFrom: displayName: " + displayName)
     return displayName;
 }
 
@@ -915,7 +955,7 @@ browser.tabs.onCreated.addListener((tab) => {
 // redirect to a new URL that OnBeforeRequest moved to a different window
 function handleNewTaskbarTab(tab) {
     let windowSiteId = windowManager[tab.windowId].siteId;
-    let windowUrl = new URL(installedSites[windowSiteId].homepage)
+    let windowSite = installedSites[windowSiteId];
     let tabUrl = new URL(tab.url);
     let wasNewTabPage = false;
     let hasOpenerId = tab.openerTabId !== undefined;
@@ -948,7 +988,7 @@ function handleNewTaskbarTab(tab) {
     console.log("handleNewTaskbarTab: wasNewTab is " + wasNewTabPage + " and linkBehavior is " + installedSites[windowSiteId].linkBehavior)
 
     // If the tab was created for the current site, but that site has linkBehavior LINK_BEHAVIOR_NEWWINDOW, move the tab to a new window
-    if (parseInt(installedSites[windowSiteId].linkBehavior) === LINK_BEHAVIOR_NEWWINDOW && (wasNewTabPage || (domainsMatch(windowUrl, tabUrl)))) {
+    if (parseInt(installedSites[windowSiteId].linkBehavior) === LINK_BEHAVIOR_NEWWINDOW && (wasNewTabPage || urlMatchesSiteDomain(tabUrl, windowSite))) {
         console.log("handleNewTaskbarTab: Tab id: " + tab.id + " is a new tab for a taskbar window with LINK_BEHAVIOR_NEWWINDOW. Moving to new window")
         tabManager[tab.id] = {
             ...tabManager[tab.id],
@@ -976,7 +1016,7 @@ function handleNewTaskbarTab(tab) {
     // we'll move the tab out of the taskbar. It should be OK to use MoveFromTaskbar to do it because OnBeforeRequest also 
     // checks to see if the site is part of another site's scope, and if it is, it will be captured that way. We have to do
     // this here because we need to know if the tab was opened by this window, and we can't know that in OnBeforeRequest
-    if (!wasNewTabPage && !hasOpenerId && !domainsMatch(windowUrl, tabUrl)) {
+    if (!wasNewTabPage && !hasOpenerId && !urlMatchesSiteDomain(tabUrl, windowSite)) {
         console.log("handleNewTaskbarTab: Tab id: " + tab.id + " is a new tab for a taskbar window, but it's out of scope. Moving to new window")
         moveFromTaskbar(tab, false);
         return;
@@ -1007,13 +1047,23 @@ function closeUnusedTab(tabId) {
     });
 }
 
-// Compare domains of two URLs. If they match, return true. Otherwise return false
-function domainsMatch(url1, url2) {
-    console.log("domainsMatch: url1: " + url1 + ", url2: " + url2)
-    url1Domain = psl.parse(url1.hostname).domain;
-    url2Domain = psl.parse(url2.hostname).domain;
-    console.log("domainsMatch: " + (url1Domain === url2Domain ? "true" : "false"))
-    return url1Domain === url2Domain;
+// True if the URL sits on the same registrable domain as the installed site.
+//
+// The site's registrable domain was worked out once, when it was installed, so
+// this stays synchronous. That matters: both callers are inside the blocking
+// webRequest handler, which cannot await. Testing a host against a known
+// registrable domain gives the same answer as comparing two separately computed
+// domains, without needing the public suffix list at request time.
+function urlMatchesSiteDomain(url, installedSite) {
+    let domain = installedSite && installedSite.baseDomain;
+    if (!domain) {
+        console.log("urlMatchesSiteDomain: No baseDomain recorded for the site, treating as no match")
+        return false;
+    }
+    let host = url.hostname;
+    let matches = host === domain || host.endsWith("." + domain);
+    console.log("urlMatchesSiteDomain: " + host + " vs " + domain + ": " + matches)
+    return matches;
 }
 
 let delayedRequests = {} // List of requests that were delayed by a previous run of OnBeforeRequest
@@ -1089,7 +1139,8 @@ browser.webRequest.onBeforeRequest.addListener(
                 + windowManager[requestWindowId].siteId)
 
             siteUrl = new URL(installedSites[windowManager[requestWindowId].siteId].homepage);
-            if (domainsMatch(requestUrl, siteUrl) && (requestSiteId === "" || requestSiteId === windowManager[requestWindowId].siteId)) {
+            if (urlMatchesSiteDomain(requestUrl, installedSites[windowManager[requestWindowId].siteId])
+                && (requestSiteId === "" || requestSiteId === windowManager[requestWindowId].siteId)) {
 
                 // CASE #4 - This is a request to the same domain as the taskbar window, and doesn't belong to any other installed site.
                 // We allow such requests to go through. Some sites switch domains, especially for login flows and such. But this  
@@ -1583,12 +1634,17 @@ browser.runtime.onMessage.addListener(function (request, sender) {
 
                     refreshPinnedState().then(function () {
 
-                        GetActiveTabIconURL(windowId).then((activeTabIconURL) => {
+                        Promise.all([
+                            GetActiveTabIconURL(windowId),
+                            describeScope(newScope)
+                        ]).then(([activeTabIconURL, described]) => {
 
                             installSite = {
                                 id: newSiteId,
                                 scope: newScope,
-                                displayName: getDisplayName(newScope),
+                                displayName: described.displayName,
+                                baseDomain: described.baseDomain,
+                                subdomainCount: described.subdomainCount,
                                 launchWithFirefox: installedSites[siteId].launchWithFirefox,
                                 homepage: newHomepage,
                                 linkBehavior: oldLinkBehavior,
@@ -1759,8 +1815,15 @@ browser.storage.local.get("installedSites", function (result) {
         return;
     }
     installedSites = result.installedSites || {};
-    sortInstalledSites();
-    refreshPinnedState().then(function () {
+    // A failed backfill costs link capture accuracy for the affected site, but
+    // it must not stop initialization: onBeforeRequest stalls every request
+    // until `initialized` is true.
+    backfillSiteDomains().catch(function (error) {
+        console.error("Initialization: Could not backfill site domains: " + error);
+    }).then(function () {
+        sortInstalledSites();
+        return refreshPinnedState();
+    }).then(function () {
         console.log("Initialization: installedSites: " + JSON.stringify(installedSites));
 
         // Add any existing windows to windowManager and set tab state for all tabs
@@ -1785,6 +1848,8 @@ browser.storage.local.get("installedSites", function (result) {
                 });
             });
         });
+    }).catch(function (error) {
+        console.error("Initialization: Failed: " + error);
     });
 });
 

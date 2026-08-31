@@ -1,2 +1,5 @@
 # Build output from tools/build-xpi.ps1
 dist/
+
+# Release artifacts are attached to GitHub Releases, not tracked here
+taskbar-tabs.xpi

@@ -4,6 +4,19 @@
     "description": "APIs supporting taskbar_tabs",
     "functions": [
       {
+        "name": "parseHost",
+        "type": "function",
+        "async": true,
+        "description": "Splits a hostname using Firefox's public suffix list, returning domain, publicSuffix, sld and subdomain",
+        "parameters": [
+          {
+            "name": "host",
+            "type": "string",
+            "description": "A hostname, with no scheme, port or path"
+          }
+        ]
+      },
+      {
         "name": "setAUMID",
         "type": "function",
         "async": false,
