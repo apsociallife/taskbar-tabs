@@ -137,16 +137,24 @@ function decodeRemoteImage(spec) {
 /**
  * Resolves an icon for a site, trying progressively more forgiving sources.
  *
- * Places is preferred because it stores favicons already rasterized, so it
- * sidesteps SVG entirely for any page the user has actually visited.
+ * The live favicon is tried first. Places is only a fallback, because its
+ * lookup is per page and will happily answer with an origin-level icon: asking
+ * it about https://docs.google.com/spreadsheets/ returns the Google Drive logo
+ * rather than the Sheets one, which is how a correct-looking window icon ended
+ * up next to a wrong shortcut icon.
  *
- * @param {string} iconURL - A favicon URL, typically tab.favIconUrl.
+ * @param {string} iconURL - A favicon URL, typically tab.favIconUrl. This is
+ *   the icon the window is actually showing.
  * @param {string} [pageURL] - The page the icon belongs to, used to look the
- *   favicon up in Places.
+ *   favicon up in Places if the live one can't be decoded.
  * @returns {Promise<imgIContainer>} The decoded icon.
  */
 async function loadIcon(iconURL, pageURL) {
   let sources = [];
+
+  if (iconURL) {
+    sources.push(() => decodeRemoteImage(iconURL));
+  }
 
   if (pageURL) {
     sources.push(async () => {
@@ -156,10 +164,6 @@ async function loadIcon(iconURL, pageURL) {
       }
       return decodeImage(favicon.dataURI);
     });
-  }
-
-  if (iconURL) {
-    sources.push(() => decodeRemoteImage(iconURL));
   }
 
   sources.push(() => decodeImage(Favicons.defaultFavicon));
@@ -274,6 +278,25 @@ this.experiments_taskbar_tabs = class extends ExtensionAPI {
               }
             } catch (error) {
               console.error("API createShortcut: Failed for siteId " + siteId + ":", error);
+              throw error;
+            }
+          },
+
+          // Rewrites the icon file an already-created shortcut points at.
+          //
+          // The Start Menu shortcut and the taskbar pin are two separate .lnk
+          // files, but both reference this one .ico by path, so replacing its
+          // contents updates both without touching either shortcut. That
+          // matters: recreating the shortcut would drop the taskbar pin.
+          async refreshIcon(siteId, iconURL, pageURL) {
+            try {
+              let icon = await loadIcon(iconURL, pageURL);
+              let iconPath = iconPathFor(siteId);
+              await writeIconFile(iconPath, icon);
+              console.log("API refreshIcon: Rewrote " + iconPath + " from " + iconURL);
+              return iconPath;
+            } catch (error) {
+              console.error("API refreshIcon: Failed for siteId " + siteId + ":", error);
               throw error;
             }
           },

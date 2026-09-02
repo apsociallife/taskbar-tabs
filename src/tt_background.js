@@ -106,6 +106,34 @@ function uninstallSite(siteId) {
     console.log("uninstallSite: installedSites: " + JSON.stringify(installedSites));
 }
 
+// Bring the site's icon file back in line with a favicon.
+//
+// The window icon follows tab.favIconUrl live, but the .ico the shortcut and
+// taskbar pin point at is only written when the site is installed or renamed,
+// so it drifts when a site changes its favicon.
+async function refreshSiteIcon(siteId, iconURL, pageURL) {
+    let site = installedSites[siteId];
+    if (!site) {
+        console.log("refreshSiteIcon: No installed site with id " + siteId);
+        return false;
+    }
+    if (!iconURL) {
+        console.log("refreshSiteIcon: Tab has no favicon yet, nothing to write");
+        return false;
+    }
+
+    try {
+        await browser.experiments.taskbar_tabs.refreshIcon(siteId, iconURL, pageURL);
+        site.iconURL = iconURL;
+        await browser.storage.local.set({ installedSites: installedSites });
+        console.log("refreshSiteIcon: Updated the icon for " + site.displayName);
+        return true;
+    } catch (error) {
+        console.error("refreshSiteIcon: Could not update the icon for " + site.displayName + ": " + error);
+        return false;
+    }
+}
+
 async function isSitePinned(siteId) {
     try {
         const isPinned = await browser.experiments.taskbar_tabs.isPinned(siteId);
@@ -1483,6 +1511,23 @@ browser.runtime.onMessage.addListener(function (request, sender) {
         // If we didn't find a window, open the site
         console.log("onMessage:activateSite: No window found with matching siteId: " + request.siteId + ". Opening new window")
         browser.windows.create({ url: installedSites[request.siteId].homepage });
+    }
+
+    // Popup asked to bring the site's shortcut icon back in line with what the
+    // window is currently showing
+    if (request.type === 'refreshIcon') {
+        console.log("onMessage:refreshIcon");
+        browser.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+            if (browser.runtime.lastError) {
+                console.error("Error querying for tabs: " + browser.runtime.lastError.message);
+                return;
+            }
+            let windowId = tabs[0].windowId;
+            let siteId = windowManager[windowId] ? windowManager[windowId].siteId : "";
+            refreshSiteIcon(siteId, tabs[0].favIconUrl, tabs[0].url).then(function (updated) {
+                browser.runtime.sendMessage({ type: "iconRefreshed", updated: updated });
+            });
+        });
     }
 
     // Popup requests to uninstall the site given

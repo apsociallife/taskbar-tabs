@@ -97,6 +97,30 @@
         ]
       },
       {
+        "name": "refreshIcon",
+        "type": "function",
+        "async": true,
+        "description": "Rewrites the icon file the site's shortcut and taskbar pin both point at, leaving the shortcuts themselves alone",
+        "parameters": [
+          {
+            "name": "siteId",
+            "type": "string",
+            "description": "The siteId whose icon file should be rewritten"
+          },
+          {
+            "name": "iconURL",
+            "type": "string",
+            "description": "The favicon to write, normally the current tab's favIconUrl"
+          },
+          {
+            "name": "pageURL",
+            "type": "string",
+            "optional": true,
+            "description": "The page the icon belongs to, used as a fallback lookup in Places"
+          }
+        ]
+      },
+      {
         "name": "deleteShortcut",
         "type": "function",
         "async": true,

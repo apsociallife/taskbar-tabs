@@ -14,6 +14,8 @@ var scopeInitial = ""
 
 var uninstallSite = document.getElementById('uninstallSite');
 var manageSites = document.getElementById('manageSites');
+var refreshIcon = document.getElementById('refreshIcon');
+var refreshIconLabel = refreshIcon.textContent;
 
 var defaultPinSite = document.getElementById('defaultPinSite');
 var defaultLaunchWithFirefox = document.getElementById('defaultLaunchWithFirefox');
@@ -107,6 +109,12 @@ launchWithFirefox.addEventListener('change', function () {
 // Save the new tab behavior
 newTabHomepage.addEventListener('change', function () {
     chrome.runtime.sendMessage({ type: "updateInstalledSite", property: "newTabHomepage", value: newTabHomepage.checked })
+});
+
+// Rewrite the site's shortcut icon from the favicon this window is showing
+refreshIcon.addEventListener('click', function () {
+    refreshIcon.textContent = "Updating taskbar icon\u2026";
+    chrome.runtime.sendMessage({ type: "refreshIcon" });
 });
 
 // Uninstall the site
@@ -251,6 +259,18 @@ chrome.runtime.onMessage.addListener(function (request) {
             document.getElementById('siteList').appendChild(site);
         });
 
+    }
+
+    // Report the outcome of an icon refresh in the action row itself, then put
+    // the label back. Windows caches shortcut icons, so say plainly that the
+    // taskbar may not repaint until the pin is next redrawn.
+    if (request.type == "iconRefreshed") {
+        refreshIcon.textContent = request.updated
+            ? "Taskbar icon updated"
+            : "Couldn't update the taskbar icon";
+        setTimeout(function () {
+            refreshIcon.textContent = refreshIconLabel;
+        }, 2500);
     }
 
     // Sets information about the installed site in site popup mode
