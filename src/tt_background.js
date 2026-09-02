@@ -1628,11 +1628,18 @@ browser.runtime.onMessage.addListener(function (request, sender) {
                     newScope = request.value;
                     newSiteId = crc32(newScope);
 
-                    //Check to see if the current tab is in the new scope
+                    // A new scope has to contain the page this window is on, otherwise
+                    // the window would immediately be out of its own scope
                     currentUrl = new URL(tabs[0].url);
                     if (!isInScope(currentUrl, newScope)) {
                         console.log("onMessage:updateInstalledSite: Current tab is not in the new scope. Not changing scope.")
+                        // Send the reason after the site data, which resets the box
                         browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[siteId] })
+                        browser.runtime.sendMessage({
+                            type: "scopeRejected",
+                            reason: "This window is showing " + currentUrl.pathname + ", which is outside that scope. "
+                                + "Navigate to a page inside the new scope first."
+                        });
                         break;
                     }
 
@@ -1640,6 +1647,10 @@ browser.runtime.onMessage.addListener(function (request, sender) {
                     if (installedSites[newSiteId]) {
                         console.log("onMessage:updateInstalledSite: New scope is already in use. Not changing scope.")
                         browser.runtime.sendMessage({ type: "setInstalledSite", installedSite: installedSites[siteId] })
+                        browser.runtime.sendMessage({
+                            type: "scopeRejected",
+                            reason: "\"" + installedSites[newSiteId].displayName + "\" already uses that scope."
+                        });
                         break;
                     }
 
@@ -1687,7 +1698,10 @@ browser.runtime.onMessage.addListener(function (request, sender) {
                             installSite = {
                                 id: newSiteId,
                                 scope: newScope,
-                                displayName: described.displayName,
+                                // Keep the name the site already has. Regenerating it from
+                                // the new scope silently renames a site you deliberately
+                                // called "Slides" to "Google Docs Presentation".
+                                displayName: installedSites[siteId].displayName,
                                 baseDomain: described.baseDomain,
                                 subdomainCount: described.subdomainCount,
                                 launchWithFirefox: installedSites[siteId].launchWithFirefox,

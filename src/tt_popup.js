@@ -10,6 +10,7 @@ var homepageInitial = ""
 
 var scopeInput = document.getElementById('scopeInput');
 var saveScope = document.getElementById('saveScope');
+var scopeMessage = document.getElementById('scopeMessage');
 var scopeInitial = ""
 
 var uninstallSite = document.getElementById('uninstallSite');
@@ -85,15 +86,45 @@ saveHomepage.addEventListener('click', function () {
     }
 });
 
+// Show or clear the explanation under the scope box
+function setScopeMessage(text) {
+    scopeMessage.textContent = text || "";
+    scopeMessage.style.display = text ? 'block' : 'none';
+}
+
+// Why this scope can't be saved, or null if it's fine
+function scopeProblem(scope) {
+    // A scope is a hostname with an optional wildcard prefix and optional path
+    let hostnameRegex = /^(\*\.)?((?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63}(?<!-))*)(\/[\w.-]*)*$/;
+    if (scope.length === 0) {
+        return "Enter a scope, like *.example.com/path";
+    }
+    if (scope.length > 255) {
+        return "That scope is too long.";
+    }
+    if (!hostnameRegex.test(scope)) {
+        return "A scope is a hostname and optional path, like *.example.com/path";
+    }
+    return null;
+}
+
 // Save the scope as long as it's a hostname with an optional wildcard prefix and optional path
 saveScope.addEventListener('click', function () {
-    let hostnameRegex = /^(\*\.)?((?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63}(?<!-))*)(\/[\w.-]*)*$/;
-    scopeInput.value = scopeInput.value.trim();
-    if (!(scopeInput.value.length === 0 || scopeInput.value.length > 255 || !hostnameRegex.test(scopeInput.value))) {
-        scopeInitial = scopeInput.value;
-        saveScope.style.display = 'none';
-        chrome.runtime.sendMessage({ type: "updateInstalledSite", property: "scope", value: scopeInput.value });
+    // The homepage box adds a missing scheme, so accept a pasted URL here and
+    // drop the scheme rather than silently refusing to save.
+    let scope = scopeInput.value.trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+    scopeInput.value = scope;
+
+    let problem = scopeProblem(scope);
+    if (problem) {
+        setScopeMessage(problem);
+        return;
     }
+
+    setScopeMessage("");
+    scopeInitial = scope;
+    saveScope.style.display = 'none';
+    chrome.runtime.sendMessage({ type: "updateInstalledSite", property: "scope", value: scope });
 });
 
 // Save the link behavior
@@ -167,6 +198,7 @@ function updateSettings() {
 function switchLayout(layout) {
     document.getElementById('main').style.display = layout === "main" ? 'block' : 'none';
     document.getElementById('site').style.display = layout === "site" ? 'block' : 'none';
+    setScopeMessage("");
 }
 
 // Handle messages from the background process
@@ -271,6 +303,12 @@ chrome.runtime.onMessage.addListener(function (request) {
         setTimeout(function () {
             refreshIcon.textContent = refreshIconLabel;
         }, 2500);
+    }
+
+    // The background refused the new scope, so say why rather than just
+    // snapping the box back to the old value
+    if (request.type == "scopeRejected") {
+        setScopeMessage(request.reason);
     }
 
     // Sets information about the installed site in site popup mode

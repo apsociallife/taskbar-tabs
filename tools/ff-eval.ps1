@@ -27,6 +27,11 @@ Evaluate inside an add-on's background context instead of the parent process.
 Pass the add-on ID, e.g. taskbar-tabs@mozilla.com. In that context the WebExtension
 `browser` API and the extension's own background globals are in scope.
 
+.PARAMETER Frame
+Which of the add-on's frame targets to evaluate in, matched against the target's
+URL. Defaults to the background page. Pass e.g. 'tt_popup' to drive the popup
+document instead, after opening it in a tab.
+
 .PARAMETER Port
 Debugger server port. Defaults to 6000.
 
@@ -44,6 +49,7 @@ param(
   [string]$Script,
   [string]$ScriptFile,
   [string]$Addon,
+  [string]$Frame = 'background',
   [int]$Port = 6000,
   [int]$TimeoutSeconds = 60
 )
@@ -131,9 +137,9 @@ try {
 
     Send-Packet -Stream $stream -Obj @{ to = $watcher; type = 'watchTargets'; targetType = 'frame' }
 
-    # An add-on can expose several frame targets. The background page is the one
-    # that has the extension's globals and the `browser` API, so prefer it and
-    # only settle for another target if it never shows up.
+    # An add-on can expose several frame targets: the background page, and a
+    # document for any extension page currently open. Collect them all, then
+    # pick the one whose URL matches -Frame.
     $targets = @()
     $stream.ReadTimeout = 4000
     try {
@@ -142,7 +148,6 @@ try {
         if ($p.error) { throw "RDP error: $($p.error) - $($p.message)" }
         if ($p.type -eq 'target-available-form' -and $p.target.consoleActor) {
           $targets += $p.target
-          if ($p.target.url -match 'background') { break }
         }
       }
     }
@@ -150,8 +155,10 @@ try {
     $stream.ReadTimeout = $TimeoutSeconds * 1000
 
     if (-not $targets) { throw "No add-on target appeared (is the background script running?)." }
-    $chosen = $targets | Where-Object { $_.url -match 'background' } | Select-Object -First 1
-    if (-not $chosen) { $chosen = $targets[0] }
+    $chosen = $targets | Where-Object { $_.url -match $Frame } | Select-Object -First 1
+    if (-not $chosen) {
+      throw "No add-on target matching '$Frame'. Available: $(($targets | ForEach-Object { $_.url }) -join ', ')"
+    }
     Write-Verbose "Evaluating in add-on target: $($chosen.url)"
     $consoleActor = $chosen.consoleActor
   }

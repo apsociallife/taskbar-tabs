@@ -170,6 +170,15 @@ select#defaultLinkBehavior option:-moz-focusring {
     border: 2px solid #0088FF
 }
 
+.field-message {
+    display: none;
+    color: #FF9A52;
+    font-size: 12px;
+    margin-top: -6px;
+    margin-bottom: 10px;
+    max-width: 280px;
+}
+
 .action-container {
     display: flex;
     justify-content: left;
